@@ -1,0 +1,98 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  pull_request:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build binaries (matrix)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [linux, darwin, windows]
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Build
+        env:
+          OS: ${{ matrix.os }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          echo "Building for $OS/$ARCH"
+          DIST_DIR=build/dist/${OS}-${ARCH}
+          mkdir -p "$DIST_DIR"
+          ext=""
+          if [ "$OS" = "windows" ]; then
+            ext=".exe"
+          fi
+          # Build binary
+          GOOS=$OS GOARCH=$ARCH go build -o "$DIST_DIR/cifs-exporter${ext}" .
+          # Package
+          pushd "$DIST_DIR" > /dev/null
+          if [ "$OS" = "windows" ]; then
+            zip -r "cifs-exporter-${OS}-${ARCH}.zip" "cifs-exporter${ext}" >/dev/null
+          else
+            tar czf "cifs-exporter-${OS}-${ARCH}.tar.gz" "cifs-exporter${ext}"
+          fi
+          popd > /dev/null
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cifs-exporter-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            build/dist/${{ matrix.os }}-${{ matrix.arch }}/*.tar.gz
+            build/dist/${{ matrix.os }}-${{ matrix.arch }}/*.zip
+
+  # Optional convenience job to run a full multi-arch build on ubuntu (useful for release event)
+  build-all:
+    name: Build all binaries (aggregate)
+    runs-on: ubuntu-latest
+    needs: []
+    if: github.event_name == 'release'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'
+
+      - name: Run local build script
+        run: |
+          chmod +x build/build.sh || true
+          ./build/build.sh
+
+      - name: Upload all artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cifs-exporter-all
+          path: build/dist/**
+
