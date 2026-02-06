@@ -22,32 +22,36 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GO111MODULE: 'on'
+      GOCACHE: ${{ runner.temp }}/gocache
+      GOMODCACHE: ${{ runner.temp }}/gomodcache
     strategy:
+      fail-fast: false
       matrix:
-        go-version: [1.18, 1.20]
+        go-version: [ 1.18, 1.20 ]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.go-version }}
+
       - name: Prepare cache folders
-        run: mkdir -p ~/.cache/go-build ~/go/pkg/mod
+        run: |
+          mkdir -p "${GOCACHE}" "${GOMODCACHE}"
 
       - name: Cache Go modules
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ matrix.go-version }}
+            ${{ runner.os }}-go-${{ matrix.go-version }}-
 
       - name: Download modules
         run: go mod download
