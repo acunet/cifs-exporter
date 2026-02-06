@@ -271,3 +271,67 @@ Changelog (high level)
 
 - Forked from `shibumi/cifs-exporter` — added improved `cifs_up` detection, support
   for newer CIFS stats formats, and added debug logging.
+
+
+Releases
+--------
+
+This repository provides two ways to produce release artifacts (prebuilt binaries):
+
+1) GitHub Actions (recommended for CI releases)
+- A release workflow is provided at `.github/workflows/release.yml` and is triggered in the following cases:
+  - push to a tag that matches `v*` (for example `v1.0.1`)
+  - a `create` event for tags (useful when creating tags/releases via the GitHub UI)
+  - the GitHub `release` event when a release is published
+  - manual `workflow_dispatch`
+
+How to create and push an annotated tag that will trigger the workflow:
+
+```bash
+# create an annotated tag pointing at HEAD
+git tag -a v1.0.1 -m "release v1.0.1"
+# push the tag to origin (this must be pushed to GitHub to trigger workflows)
+git push origin v1.0.1
+```
+
+Notes:
+- Make sure the tag points to a commit that contains the `.github/workflows/release.yml` file. Workflows execute from the commit that triggered the event, so pushing a tag that points at a commit without the workflow will not run it.
+- If the workflow still doesn't run, verify the tag exists on the remote with `git ls-remote --tags origin`.
+
+2) Local build script (builds cross-platform archives locally)
+- A convenience script is available at `build/build.sh` that produces tar.gz / zip packages for common platforms.
+
+Example usage:
+
+```bash
+# create local artifacts with a version string embedded
+./build/build.sh v1.0.1
+# artifacts are produced under build/dist/
+ls -R build/dist
+```
+
+The script cross-compiles for a set of GOOS/GOARCH targets and adds the `main.version` ldflag so the built binaries report the version when run with `-version`.
+
+Automated releases using GoReleaser (CI)
+---------------------------------------
+
+The workflow tries to use GoReleaser via the GitHub Action `goreleaser/goreleaser-action` to produce cross-platform binaries and create a GitHub Release with assets. The action requires the `GITHUB_TOKEN` (automatically provided by GitHub Actions) and appropriate permissions (the workflow sets `contents: write` and `packages: write` for this reason).
+
+If you prefer, you can create a release locally using GoReleaser (`brew install goreleaser` / `curl -sSfL`) and run:
+
+```bash
+# run GoReleaser locally (example)
+goreleaser release --rm-dist
+```
+
+Troubleshooting release workflow
+--------------------------------
+- The most common reason a release job doesn't run is that the tag wasn't pushed to GitHub. Run `git ls-remote --tags origin` and confirm.
+- Ensure the tag references a commit that contains `.github/workflows/release.yml` (workflows are resolved from that commit).
+- For quick debugging, trigger the workflow manually via the Actions UI (`workflow_dispatch`).
+- If you use branch protection or require PR merges, ensure the tag is created after the workflow file is present in the target branch.
+
+About this fork (short)
+-----------------------
+
+This repository is a fork of the upstream project `shibumi/cifs-exporter`. The fork focuses on correctness and compatibility with newer Linux kernel CIFS stats formats and adds small improvements and fixes. If you rely on the upstream project's release artifacts, check the upstream repository: https://github.com/shibumi/cifs-exporter

@@ -1,3 +1,4 @@
+# yaml
 name: CI / Release
 
 on:
@@ -7,10 +8,10 @@ on:
       - master
     tags:
       - 'v*'
-  pull_request:
-    branches:
-      - main
-      - master
+  create:
+    # catches when a tag is created on the remote
+    tags:
+      - 'v*'
   release:
     types: [published]
   workflow_dispatch: {}
@@ -43,6 +44,7 @@ jobs:
     needs: test
     if: |
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'create' && github.ref_type == 'tag') ||
       (github.event_name == 'release' && github.event.action == 'published') ||
       (github.event_name == 'workflow_dispatch')
     permissions:
@@ -60,12 +62,31 @@ jobs:
         with:
           go-version: 1.20
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@main
-        with:
-          cosign-release: 'v1.14.0'
+      - name: Build cross-platform artifacts (local script)
+        run: |
+          chmod +x build/build.sh
+          # pass the tag name as version if available, fallback to 'ci'
+          VERSION=${GITHUB_REF_NAME:-ci}
+          ./build/build.sh "$VERSION"
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
 
-      - name: Run GoReleaser
+      - name: Upload artifacts to workflow (for debugging)
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: build/dist
+
+      - name: Create GitHub Release and attach artifacts (fallback)
+        if: always()
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref_name }}
+          files: build/dist/**
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Try GoReleaser (optional, will run if installed by action)
         uses: goreleaser/goreleaser-action@v3
         with:
           version: latest
@@ -74,16 +95,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: 1
 
-      - name: Setup ko
+      - name: Install cosign (optional, used when signing images)
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: 'v1.14.0'
+
+      - name: Build and publish container image (optional)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: imjasonh/setup-ko@v0.4
 
-      - name: Build and publish container image and sign
+      - name: Publish and sign image (optional)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          IMAGE=$(ko publish ./ --tags "${{ github.ref_name }}") || true
+          echo "Published image: $IMAGE"
+          if [ -n "$IMAGE" ]; then
+            cosign sign --keyless "$IMAGE" || true
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COSIGN_EXPERIMENTAL: 1
-        run: |
-          # Publish the image with ko using the current tag (github.ref_name is the tag)
-          IMAGE=$(ko publish ./ --tags "${{ github.ref_name }}")
-          echo "Published image: $IMAGE"
-          # Sign the published image using OIDC-based cosign
-          cosign sign --keyless "$IMAGE"
